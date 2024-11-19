@@ -1,0 +1,386 @@
+<!DOCTYPE html>
+<html lang="en" >
+<head>
+  <meta charset="UTF-8">
+  <title>Car riding Simulator game (VR) (3D)</title>
+  <link rel="stylesheet" href="./style.css">
+
+</head>
+<body>
+<!-- partial:index.partial.html -->
+<div id="liscenses" style="display: none">
+	Wooden boards texture created by <a href="https://opengameart.org/users/dakal">Dakal</a> on <a href="https://opengameart.org/content/textures-stk">opengameart.com</a>. Liscened under the <a href="https://creativecommons.org/licenses/by/3.0/">Creative Commons Attribution 3.0 License</a>.
+	<br/>
+	Dirt texture created by <a href="https://opengameart.org/users/lamoot">Lamoot</a> on <a href="https://opengameart.org/content/dirt-001">opengameart.com</a>. Liscened under the <a href="https://creativecommons.org/licenses/by/3.0/">Creative Commons Attribution 3.0 License</a>.
+	<br/>
+	Unmodifed version of tire-track texture created by <a href="https://en.wikipedia.org/wiki/User:Ekin">Ekin</a> on <a href="https://commons.wikimedia.org/wiki/File:Skidmarks.svg">wikipedia.com</a>.
+	<br/>
+	Unmodifed version of dirt effect texture created by <a href="https://pixabay.com/users/azyrit-3008909/">Azyrit</a> on <a href="https://pixabay.com/illustrations/dirt-dirty-effect-texture-1626524/">pixabay.com</a>.
+</div>
+<script id="vertex" class="hidden" type="x-shader/x-vertex">
+	varying vec3 posi;
+	varying vec3 norma;
+	
+	varying vec3 vLightFront;
+	varying vec3 vIndirectFront;
+	
+	
+	#ifndef FLAT_SHADED
+		varying vec3 vNormal;
+	#endif
+	
+	#include <common>
+	#include <uv_pars_vertex>
+	#include <uv2_pars_vertex>
+	#include <envmap_pars_vertex>
+	#include <bsdfs>
+	#include <lights_pars_begin>
+	#include <color_pars_vertex>
+	#include <fog_pars_vertex>
+	#include <morphtarget_pars_vertex>
+	#include <skinning_pars_vertex>
+	#include <shadowmap_pars_vertex>
+	#include <logdepthbuf_pars_vertex>
+	#include <clipping_planes_pars_vertex>
+
+	
+	
+	void main(){
+		#include <uv_vertex>
+		#include <uv2_vertex>
+		#include <color_vertex>
+		#include <beginnormal_vertex>
+		#include <morphnormal_vertex>
+		#include <skinbase_vertex>
+		#include <skinnormal_vertex>
+		#include <defaultnormal_vertex>
+		#ifndef FLAT_SHADED
+			vNormal = normalize( transformedNormal );
+		#endif
+		#include <begin_vertex>
+		#include <morphtarget_vertex>
+		#include <skinning_vertex>
+		#include <project_vertex>
+		#include <logdepthbuf_vertex>
+		#include <clipping_planes_vertex>
+		#include <worldpos_vertex>
+		#include <envmap_vertex>
+		#include <lights_lambert_vertex>
+		#include <shadowmap_vertex>
+		#include <fog_vertex>
+		vec4 wP = (modelMatrix * vec4(position, 1.0));
+		
+		
+		posi = wP.xyz;
+		norma = normal;
+		// vec4 modelViewPosition = modelViewMatrix * vec4(position, 1.0);
+		// gl_Position = projectionMatrix * modelViewPosition;
+	}
+</script>
+<script id="fragment" class="hidden" type="x-shader/x-fragment">
+	varying vec3 posi;
+	varying vec3 norma;
+	
+	varying vec3 vLightFront;
+	varying vec3 vIndirectFront;
+	float SEED = 12345.67;
+	
+	#include <common>
+	#include <packing>
+	#include <dithering_pars_fragment>
+	#include <color_pars_fragment>
+	#include <uv_pars_fragment>
+	#include <uv2_pars_fragment>
+	#include <map_pars_fragment>
+	#include <alphamap_pars_fragment>
+	#include <aomap_pars_fragment>
+	#include <lightmap_pars_fragment>
+	#include <emissivemap_pars_fragment>
+	#include <envmap_common_pars_fragment>
+	#include <envmap_pars_fragment>
+	#include <cube_uv_reflection_fragment>
+	#include <bsdfs>
+	#include <lights_pars_begin>
+	#include <fog_pars_fragment>
+	#include <shadowmap_pars_fragment>
+	#include <shadowmask_pars_fragment>
+	#include <specularmap_pars_fragment>
+	#include <logdepthbuf_pars_fragment>
+	#include <clipping_planes_pars_fragment>
+	
+	float VORONOI_R = 0.5;
+	float VORONOI_SIZE = 1.0;
+	
+	float epsil = 0.01;
+	
+	float rand(float n){
+	    return fract(sin(n) * 43758.5453123);
+	}
+	
+	vec3 rand(vec3 v){
+	    return vec3(
+	        rand(v.x + sqrt(2.0) * v.y - sqrt(3.0) * v.z),
+	        rand(v.x * sqrt(5.0) - v.y + sqrt(8.0) * v.z),
+	        rand(-v.x * sqrt(7.0) - v.y * sqrt(6.0) + v.z)
+	    );
+	}
+	
+	vec3 rand1(vec3 v){
+	    return rand(v) * 2.0 - 1.0;
+	}
+	
+	float rand(float x, float y, float z){
+	    return rand(x + sqrt(2.0) * y - sqrt(3.0) * z);
+	}
+	
+	float rand(float x, float y, float z, float w){
+	    return rand(x + sqrt(2.0) * y - sqrt(3.0) * z + sqrt(5.0) * w);
+	}
+	
+	float smoothF(float n, float s){
+	    return (4.0 - 4.0 * s) * n * n * n + (6.0 * s - 6.0) * n * n + (3.0 - 2.0 * s) * n;
+	}
+	
+	
+	float srand(vec3 n, float s){
+	    return mix(
+	        mix(
+	        	mix(rand(floor(n.x), floor(n.y), floor(n.z)), rand(ceil(n.x), floor(n.y), floor(n.z)), smoothF(fract(n.x), s)),
+	        	mix(rand(floor(n.x), ceil(n.y), floor(n.z)), rand(ceil(n.x), ceil(n.y), floor(n.z)), smoothF(fract(n.x), s)),
+	        	smoothF(fract(n.y), s)
+	    	),
+	        mix(
+	        	mix(rand(floor(n.x), floor(n.y), ceil(n.z)), rand(ceil(n.x), floor(n.y), ceil(n.z)), smoothF(fract(n.x), s)),
+	        	mix(rand(floor(n.x), ceil(n.y), ceil(n.z)), rand(ceil(n.x), ceil(n.y), ceil(n.z)), smoothF(fract(n.x), s)),
+	        	smoothF(fract(n.y), s)
+	    	),
+	        smoothF(fract(n.z), s)
+	    );
+	}
+	
+	float pixel(float n, float a){
+	    return floor(n / a + 0.5) * a;
+	}
+	
+	float voronoi(vec3 v){
+	    vec3 v2 = floor(v);
+	    float m = -1.0;
+	    for(float x = -VORONOI_SIZE; x <= VORONOI_SIZE; x++)
+	        for(float y = -VORONOI_SIZE; y <= VORONOI_SIZE; y++)
+	            for(float z = -VORONOI_SIZE; z <= VORONOI_SIZE; z++){
+	                vec3 o = vec3(x, y, z) + rand1(vec3(x, y, z) + v2) * VORONOI_R - fract(v);
+	                float l = dot(o, o);
+	                if(m < 0.0 || m > l)
+	                    m = l;
+	            }
+	    return m;
+	}
+	
+	float noise(vec3 pos, float dist){
+		pos /= 3.0;
+		vec3 p = pos + pow(srand(pos * 0.6, 1.5), 3.0) * 15.0;
+		return srand(p * 0.6, 1.5) * 5.0
+			+ srand(p * 1.0, 1.5) * 3.0 * 1.0 * clamp(1.0 - dist * 0.005, 0.0, 1.0)
+			+ srand(p * 8.0, 1.5) * 2.0 * clamp(1.0 - dist * 0.02, 0.0, 1.0)
+			+ srand(pos * 50.0, 1.5) * clamp(1.0 - dist * 0.015, 0.0, 1.0) * 0.1;
+		// return 0.0;
+		// return voronoi(pos);
+	    // pos.xz *= 2.0;
+	    float n = srand(pos * 3.0, 1.5) * 0.6 + srand(pos * 10.0 + SEED, 1.5) * 0.2 + srand(pos * 30.0 + SEED * 2.0, 1.5) * 0.1 + srand(pos * 300.0 + SEED * 3.0, 1.5) * 0.2;
+	    return pow(n, 3.0);
+	}
+	
+	float bump(vec3 pos, vec3 dir, float dist){
+		return (noise(pos + epsil * dir, dist) - noise(pos, dist)) * 0.9;
+	}
+	
+// 	float shadowMask() {
+// 		float shadow = 1.0;
+// 		DirectionalLightShadow directionalLight = directionalLightShadows[0];
+// 		shadow *= receiveShadow ? getShadow(directionalShadowMap[0], directionalLight.shadowMapSize, directionalLight.shadowBias, directionalLight.shadowRadius, vDirectionalShadowCoord[0]) : 1.0;
+		
+// 		return shadow;
+// 	}
+	// #include <logdepthbuf_pars_fragment>
+	void main(){
+		#include <clipping_planes_fragment>
+		#include <logdepthbuf_fragment>
+		#include <map_fragment>
+		#include <color_fragment>
+		#include <alphamap_fragment>
+		#include <alphatest_fragment>
+		#include <specularmap_fragment>
+		#include <emissivemap_fragment>
+		#include <lightmap_fragment>
+	    // vec2 uv = 2.0 * fragCoord / iResolution.y - vec2(iResolution.x / iResolution.y, 1.0);
+		vec3 pos = posi;
+		vec3 viewVector = pos - cameraPosition;
+		
+// 		//light = normalize(vec3(0) - pos);
+		// pos /= 20.0;
+		vec3 light = normalize(vec3(1, 0.6, -1));
+		vec3 norm = norma;
+		float dist = length(viewVector);
+		
+		vec3 snowDir = normalize(vec3(1., 7.2, 1.));
+		
+		vec3 groundColor = (dot(snowDir, norm) + bump(pos, snowDir, dist) > 0.721) ? vec3(1) : vec3(145, 105, 101) / 255.0;
+		
+		vec3 sky = vec3(104, 148, 226) / 255.0;
+		vec3 color = vec3(0);
+		color += pow(groundColor, vec3(1.8)) * pow(sky, vec3(1.5)) * 0.7;
+		
+        	    color += pow(clamp((dot(norm, light) + bump(pos, light, dist)) * 1.0, 0.0, 1.0), 0.5) * 0.5
+			    * groundColor * getShadowMask();
+		color -= noise(pos, dist) * 0.002;
+		
+		color.r = color.r < 0.0031308 ? color.r * 12.92 : 1.055 * pow(color.r, 1.0 / 2.6) - 0.055;
+		color.g = color.g < 0.0031308 ? color.g * 12.92 : 1.055 * pow(color.g, 1.0 / 2.6) - 0.055;
+		color.b = color.b < 0.0031308 ? color.b * 12.92 : 1.055 * pow(color.b, 1.0 / 2.6) - 0.055;
+		
+		// color = mix(color, sky, clamp((length(viewVector) - 10.0) * 0.005, 0.0, 0.9));
+		
+	    gl_FragColor = vec4(
+		    color, 1.0
+	    );
+		#include <tonemapping_fragment>
+	#include <encodings_fragment>
+	#include <fog_fragment>
+	#include <premultiplied_alpha_fragment>
+	#include <dithering_fragment>
+	}
+</script>
+<script id="treefragment" class="hidden" type="x-shader/x-fragment">
+	varying vec3 posi;
+	varying vec3 norma;
+	
+	varying vec3 vLightFront;
+	varying vec3 vIndirectFront;
+	uniform vec3 root;
+	float epsil = 0.01;
+	
+	#include <common>
+	#include <packing>
+	#include <dithering_pars_fragment>
+	#include <color_pars_fragment>
+	#include <uv_pars_fragment>
+	#include <uv2_pars_fragment>
+	#include <map_pars_fragment>
+	#include <alphamap_pars_fragment>
+	#include <aomap_pars_fragment>
+	#include <lightmap_pars_fragment>
+	#include <emissivemap_pars_fragment>
+	#include <envmap_common_pars_fragment>
+	#include <envmap_pars_fragment>
+	#include <cube_uv_reflection_fragment>
+	#include <bsdfs>
+	#include <lights_pars_begin>
+	#include <fog_pars_fragment>
+	#include <shadowmap_pars_fragment>
+	#include <shadowmask_pars_fragment>
+	#include <specularmap_pars_fragment>
+	#include <logdepthbuf_pars_fragment>
+	#include <clipping_planes_pars_fragment>
+
+float rand(float n){
+    return fract(sin(n) * 43758.5453123);
+}
+
+float rand(float x, float y, float z){
+    return rand(x + sqrt(2.0) * y - sqrt(3.0) * z);
+}
+
+float smoothF(float n, float s){
+    return (4.0 - 4.0 * s) * n * n * n + (6.0 * s - 6.0) * n * n + (3.0 - 2.0 * s) * n;
+}
+
+float srand(vec3 n){
+    n.xz *= 0.2;
+    n.y += length(n.xz) * 1.0;
+	n += root;
+    return mix(
+        mix(
+        	mix(rand(floor(n.x), floor(n.y), floor(n.z)), rand(ceil(n.x), floor(n.y), floor(n.z)), smoothF(fract(n.x), 1.5)),
+        	mix(rand(floor(n.x), ceil(n.y), floor(n.z)), rand(ceil(n.x), ceil(n.y), floor(n.z)), smoothF(fract(n.x), 1.5)),
+        	smoothF(fract(n.y), 1.5)
+    	),
+        mix(
+        	mix(rand(floor(n.x), floor(n.y), ceil(n.z)), rand(ceil(n.x), floor(n.y), ceil(n.z)), smoothF(fract(n.x), 1.5)),
+        	mix(rand(floor(n.x), ceil(n.y), ceil(n.z)), rand(ceil(n.x), ceil(n.y), ceil(n.z)), smoothF(fract(n.x), 1.5)),
+        	smoothF(fract(n.y), 1.5)
+    	),
+        smoothF(fract(n.z), 1.5)
+    );
+}
+
+float noise(vec3 pos, float dist){
+    return pos.y < -5.5 ? 0.0 : (srand(pos * 5.0) * 1.1
+            - srand(pos * 10.0) * 0.2 + (length(pos.xz) + pos.y * 0.03 < 0.2 ? 0.4 : 0.0))
+        * clamp(1.0 - (length(pos.xz) + (pos.y > 4.0 ? pos.y * pos.y : pos.y) * 0.25 - 1.0) * 1.0, 0.0, 1.0);
+}
+
+float bump(vec3 pos, vec3 dir, float dist){
+    return (noise(pos + epsil * dir, dist) - noise(pos, dist)) * 0.9;
+}
+
+void main(){
+	#include <clipping_planes_fragment>
+		#include <logdepthbuf_fragment>
+		#include <map_fragment>
+		#include <color_fragment>
+		#include <alphamap_fragment>
+		#include <alphatest_fragment>
+		#include <specularmap_fragment>
+		#include <emissivemap_fragment>
+		#include <lightmap_fragment>
+        vec3 pos = posi;
+	vec3 viewVector = pos - cameraPosition;
+	pos -= root;
+	// pos /= 3.0;
+        // vec3 normal = norma;
+        
+        vec3 dir = normalize(viewVector);
+        vec4 col = vec4(0, 0, 0, 0);
+        vec3 light = normalize(vec3(1, 0.6, -1));
+        
+        vec3 snowDir = normalize(vec3(1., 7.2, 1.));
+        vec3 n = normalize(normalize(vec3(pos.x, 0.0, pos.z)) + vec3(0.0, 0.5, 0.0));
+        vec4 leafColor = (dot(snowDir, n) + bump(pos, snowDir, 0.0) * 5.0 > 0.5) ? vec4(1) : vec4(56, 115, 39, 255) / 255.0;
+        vec4 sky = vec4(104, 148, 226, 255) / 255.0;
+        
+        for(float i = 0.0; i < 25.0 && (length(pos.xz) + 0.25 * pos.y < 1.5); i++){
+            float d = noise(pos, 0.0);
+            if(d > 0.5){
+			n = normalize(normalize(vec3(pos.x, 0.0, pos.z)) + vec3(0.0, 0.5, 0.0));
+			col += pow(leafColor, vec4(1.8)) * pow(sky, vec4(1.5)) * 0.7;
+                col += leafColor
+                    * pow(clamp((dot(n, light) + bump(pos, light, 0.0) * 30.0) * 5.0, 0.0, 1.0), 0.5) * 0.5 * getShadowMask();
+			col *= clamp(1.0 - i / 15.0, 0.5, 1.0);
+			col.a = 1.0;
+                break;
+            }
+            pos += dir * (0.2 + length(pos + root - cameraPosition) * 0.003);
+        }
+	
+	col.r = col.r < 0.0031308 ? col.r * 12.92 : 1.055 * pow(col.r, 1.0 / 2.6) - 0.055;
+	col.g = col.g < 0.0031308 ? col.g * 12.92 : 1.055 * pow(col.g, 1.0 / 2.6) - 0.055;
+	col.b = col.b < 0.0031308 ? col.b * 12.92 : 1.055 * pow(col.b, 1.0 / 2.6) - 0.055;
+        gl_FragColor = col;
+	
+	#include <tonemapping_fragment>
+	#include <encodings_fragment>
+	#include <fog_fragment>
+	#include <premultiplied_alpha_fragment>
+	#include <dithering_fragment>
+}
+</script>
+
+<div id="treeloc" class="hidden">15.26,14.57,41.68/14.56,15.51,55.52/25.88,9.61,50.46/36.81,5.09,40.25/24.82,7.16,34.2/21.95,10.97,42.52/35.64,4.22,23.78/29.5,5.59,24.37/33.69,8.02,49.79/44.27,10.83,58.28/30.66,9.18,71.54/37.42,9.36,77.35/47.02,8,75.33/40.73,10.25,66.61/58.59,16.58,58.8/54.33,14.45,61.97/62.72,20.31,35.49/64.31,20.73,41.56/58.8,20.72,48.27/73.02,15.04,51.06/68.7,16.09,58.26/73.59,15.23,73.77/86.15,11.77,68.69/67.11,14.93,70.34/60.98,12.01,74.71/70.09,13.3,80.52/86.57,15.46,80.36/81.83,17.23,82.79/91.13,13.92,73.47/-57.78,-9.5,91.82/-74.96,-9.95,85.93/-66.42,-9.44,90.31/-60.66,-7.03,80.02/-69.12,-8.44,74.35/-66.47,-4.86,64.8/-41.55,-0.11,110.2/-50.57,-2.95,115.06/-49.46,-2.91,104.75/-67.05,-4.64,122.8/-94.65,1.97,123.57/-80.43,-4.08,113.18/-68.3,-6.94,106.86/-91.54,-5.03,103.03/-109.95,6.05,112.15/-103.47,0.46,96.64/-93.35,-3.82,92.69/-105.5,-0.87,80.53/-136.16,-1.21,81.68/-146.01,-3.88,63.22/-106.09,-1.87,64.84/-98.82,-4.42,75.4/-88.64,-6.42,82.55/-84.09,-4.64,68.81/-78.05,6.77,51.18/-71.14,2.11,53.26/-97.85,2.15,145.05/-110.42,11.31,135.71/-117.67,15.77,121.24/-116.42,10.96,105.74/-82.92,-4.31,141.26/-73.83,-5.88,150.45/-82.35,-3.4,156.26/-80.07,-2.96,130.57/-42.41,1.95,125.72/-30.7,2.68,117.78/28.59,-2.18,166.29/13.13,1.83,157.65/13.41,-1.7,150.82/5.24,0.84,149.05/-3.37,1.39,146.07/-2.1,6.8,154.2/8.83,6.21,165.54/21.23,10.08,180.85/24.66,19.9,195.88/27.94,11.28,182.2/30.98,5,176.47/54.14,1.71,177/93.98,-13.73,173.04/105.09,-6.25,191.68/89.15,-6.8,192.54/123.43,-8.16,181.45/121.59,-2.6,187.73/159.66,-15.71,169.49/132.28,-12.12,176.01/152.74,-11.91,176.51/223.21,-19.72,121.9/229.71,-19.35,136.35/225.56,-14.83,107.94/235.51,-11.54,110.36/232.53,-10.67,95.63/240.54,-10.53,118.69/255.31,-2.24,79.28/243.37,-7.31,88.01/251.05,-10.07,102.74/257.33,-5.09,118.85/267.98,-8.48,108.1/284.62,-5.77,114.13/280.91,-8.4,95.47/262.03,-7.96,93.16/262.11,-6.51,86.3/272.11,-6.22,85.73/286.81,-6.54,83.44/293.26,-4.5,102.97/280.49,-4.58,123.06/282.06,6.82,139.74/297.25,6.89,127.51/195.3,7.11,13.21/225.75,-6.11,-26.25/215.03,-6.73,-9.54/205.86,-1.59,3.49/187.94,1.05,73.39/192.16,-0.4,61.84/129.97,-2.28,110.44/137.09,-2.43,107.37/140.57,-5.58,112.54/151.59,-8.41,107.9/170.42,-15.85,108.32/107.79,6.33,98.08/69.27,-0.1,115.57/56.27,2.16,101.79/98.41,12.65,91.53/87.66,15.4,94.91/238.26,-5.39,73.52/259.41,-4.88,50.14/249.9,-0.58,71.81/267.21,-0.26,74.18/267.49,-2.95,62.16/288.45,-0.94,54.13/328.49,-15.89,-14.32/334.15,-17.92,4.8/317.72,-17.59,10.04/312.44,-10.23,31.37/301.88,-7.2,36.52/297.35,-3.16,46.31/310.55,-5.09,51.27/322.47,-0.8,48.32/319.17,-3.36,43.11/298.65,-3.65,65.23/300.02,-4.54,59.08/278.09,-2.17,55.09/283.35,-2.77,47.56/287.27,-1.98,44.75/325.48,-18.65,-3.9/331.85,-11.08,-31.44/279.66,8.25,-125.2/269.07,1.97,-144.3/249.1,-0.32,-139.68/269,0.86,-156.99/259.61,3.72,-159.06/270.28,0.74,-162.7/239.75,3.37,-161.31/248.59,3.96,-169.7/234,5.59,-121.76/221.47,3.78,-137.2/217,5.89,-149.34/236.11,1.67,-148.68/217.98,2.36,-162.16/210,2.52,-168.59/202.47,8.9,-162.32/202.69,12.51,-154.26/217.82,5.75,-128.56/215.38,10.21,-111.99/247.1,6.46,-114.78/239.85,7.91,-113.77/248.06,2.27,-124.4/238.04,2.58,-125.83/224.91,12.2,-98.49/214.08,13.16,-92.51/200.62,20.38,-93.7/196.18,19.92,-87.64/201.38,17.58,-76.39/212.92,15.32,-80.69/212.54,18.76,-71.58/204.32,15.58,-85.73/223.61,21.04,-73.28/225.18,19.23,-57.78/217.45,21.17,-46.45/233.37,20.83,-54.41/225.73,18.97,-49.91/209.74,20.86,-54.58/205.45,22.31,-45.42/212.25,19.17,-63.04/199.67,26.5,-58.35/198.79,23.8,-64.62/175.73,33.54,-78.66/167.67,37.47,-88.28/167.12,39.51,-76.45/176.97,33.64,-72.31/182.36,30.2,-76.27/182,28.01,-81.93/188.13,23.26,-75.3/163.39,33.15,46.18/150.98,40.17,45.26/155.92,42.55,24.06/152.97,46.02,10.33/161.99,20.99,71.25/145.25,28.58,65.34/288.03,-5.43,-242.19/288.3,-7.07,-229.89/270.97,-10.67,-236.36/244.49,-3.63,-251.12/250.65,-7.7,-240.85/236.55,-8.09,-240.64/261,-1.97,-258.66/288.35,-2.89,-271.11/282.96,-4.97,-259.19/298.94,-2.26,-252.65/303.13,-0.1,-240.12/314.14,5.97,-236.22/327.01,11.48,-224.01/322.84,12.15,-255.59/266.41,-1.93,-261.39/237.53,-0.42,-267.64/243.21,2.97,-275.08/226.45,4.33,-265.25/255.62,2.15,-276.03/261.39,2.38,-282.37/271.48,-1.17,-280.34/325.28,14.65,-240.9/342.04,19.13,-222.54/338.69,17.62,-235.81/336.51,18.16,-249.38/170.52,3.47,-241.05/169.05,0.95,-254.68/174.6,-7.18,-270.06/167.46,-8.93,-291.9/149,-4.42,-285.96/146.15,-3.24,-275.23/134.59,3.25,-289.92/149.44,-3.53,-293.84/153.04,-5.76,-301.68/187.77,-3.35,-262.93/184.43,-2.68,-247.49/182.62,-2.3,-237.54/190.69,-3.28,-254.12/194.01,-5.54,-241.24/168.12,3.39,-215.32/162.37,5.9,-226.87/161.2,7.43,-233.28/152.78,9.31,-221.32/149.1,14.2,-231.72/148.56,15.61,-233.3/158.77,10.18,-239.69/155.12,10.25,-247.99/149.17,17.53,-239.66/123.92,13.46,-264.29/135.69,6.57,-268.18/122.9,7.98,-274.83/121.65,10.49,-280.56/120.15,17.04,-254.06/112.2,20.33,-263.6/104.76,23.28,-216.82/94.68,17.29,-203.08/93.97,20.26,-209.06/77.03,19.63,-213.71/67.02,20.17,-219.89/72.61,18.89,-224.53/67.45,22.72,-231.68/85.13,19.73,-253.35/95.88,22.62,-236.47/104.93,15.73,-249.57/102.87,18.08,-258.89/94.3,18.96,-254.95/81.93,24.02,-242.23/75.84,25.45,-250.28/70.99,23.58,-239.49/71.52,22.86,-262.93/82.35,20.24,-262.95/31.01,12.08,-207.41/27.77,16.19,-215.58/40.71,14.55,-217.08/32.69,15.47,-223.7/33.01,15.06,-228.47/-9.69,8.08,-154.55/-25.81,6.09,-167.4/-7.15,5.21,-174.04/-4.75,4,-167.8/-2.85,4.71,-185.95/2.73,4.65,-180.63/4.75,3.63,-177.5/13.3,1.84,-186.21/-18.88,-0.22,-195.09/-43.46,-5.04,-213.14/-57.11,-4.32,-217.63/-51.94,-1.25,-187.21/-43.54,-0.42,-175.8/-40.03,1.29,-167.83/-28.5,-1.64,-183.91/-38.36,-0.07,-186.85/-44.1,-2.42,-197.94/-60.27,-4.91,-223.04/-67.23,-2.93,-244.11/-60.42,-7.44,-246.76/-47.54,-8.94,-229.44/-62.75,1.02,-205.24/-74.51,1.69,-218.06/19.62,20.32,-221.69/19.5,18.74,-227.61/9.76,18.79,-221.62/15.93,20.57,-217.38/-14.7,-15.13,-277.7/-12.47,-18.09,-311.27/-40.09,-22.39,-305.41/-54.9,-20.02,-294.55/-42.91,-19.67,-283.94/-34.84,-20.24,-286.37/-20.2,-13.64,-269.56/14.5,14.99,-237.49/4.92,2.48,-250.56/13.59,3.81,-252.89/59.25,27.49,-258.53/60.94,24.92,-276.57/53.44,26.85,-265.78/-30,7.25,-33.68/-42.7,7.71,-36.81/-40.89,-0.94,-57.51/-20.13,-3.94,-53.87/-44.8,5.04,-45.09/-57.1,15.97,-34.16/-45.3,24.61,-15.3/-58.11,20.55,-22.15/-47.42,13.34,-80.52/-59.03,25.1,-92.9/-18.29,12.41,-119.49/-10.8,8.04,-137.65/-1.89,5.15,-129.64/-13.42,7.18,-115.42/-26.3,14.11,-130.53/-37.97,19.77,-118.12/-38.99,19.45,-132.05/-33.1,18.86,-138.82/-42.44,19.94,-124.35/-61.59,24.15,-108.58/-75.74,22.66,-113.73/-70.88,27.17,-108.61/-71.85,30.19,-95.19/-80.83,34.78,-96.87/162.45,29.02,-163.26/153.49,38.36,-151.06/145.37,41.17,-148.6/143.54,41.3,-138.29/132.65,37.43,-120.72/124.54,38.51,-121.22/126.43,36.35,-135.09/135.27,40.79,-139.77/159.89,42.91,-135.83/156.57,52.08,-124.03/164.1,55.44,-120.4/210.84,-3.59,-248.09/-21.6,15.73,-145.37/-23.1,18.19,-149.67/-20.3,15.55,-153.31/-18.36,11.15,-158.79/-17.77,10.88,-137.93/-16.09,11.65,-126.77/70.44,6.63,-121.83/80.84,8.07,-112.45/65.43,5.81,-107.51/63.1,3.06,-96.35/88.04,-0.38,-61.44/86.68,1.29,-47.14/66.86,0.62,-62.48/65.7,0.37,-76.25/56.48,-0.27,-79.7/58.27,-0.94,-64.82/79.86,6.36,-103.3/73.05,8.11,-116.21/77.07,0.72,-141.06/83.61,4.01,-138.17/87.46,10.37,-122.08/90,12.82,-118.24/44.64,-8.8,-59.72/50.07,-5.41,-45.45/34.22,-0.53,-24.57/30.88,2.22,-6.69/32.07,3.83,-5.27/24.28,2.53,-2.38/22.32,1.14,-10.64/16.76,1.33,5.34/18.85,3.85,15.41/26.33,5.22,7.1/31.66,6.07,9.51/37.24,4.47,-11.53/52.85,2.18,-8.55/42.5,6.04,-2.76/51.95,6.4,3.79/53.69,-3.25,-39.65/66.96,-2.07,-44.43/78.97,-3.04,-29.3/69.62,0.79,-12.92/59.12,-2.69,-21.96/50.87,-2.64,-30.38/43.1,-0.73,-24.5/44.18,-4.78,-34.75/62.29,-2.64,-31.02/81.11,-1.33,-23.11/90.16,0.41,-36.58/94.53,2.42,-29.4/95.73,6.52,-20.3/92.46,9.07,-11.61/111.29,21.41,-12.38/111.57,24.78,-2.89/105.36,32.17,8.58/98.8,39.29,15.75/96.64,43.15,28.67/103.75,46.37,35.25/111.45,37.28,25.95/117.7,41.23,31.1/129.57,24.68,-20.84/131.75,31.82,-3.28/119.08,18.62,-33.74/117.02,11.45,-66.01/118.23,12.98,-57.02/</div>
+<!-- partial -->
+  <script src='https://threejs.org/build/three.min.js'></script>
+<script src='https://threejs.org/examples/js/controls/OrbitControls.js'></script>
+<script src='https://threejs.org/examples/js/loaders/OBJLoader.js'></script>
+<script src='https://threejs.org/examples/js/loaders/MTLLoader.js'></script><script type="module" src="./script.js"></script>
+
+</body>
+</html>
